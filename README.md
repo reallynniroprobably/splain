@@ -92,3 +92,8 @@ The structured analysis is turned into readable text or JSON.
 ### Basic example
 ```bash
 splain rm -rf ~/Downloads
+```
+would result in 
+```bash
+This command will recursively delete any files inside the directory ~/Downloads ignoring write protection.
+```
