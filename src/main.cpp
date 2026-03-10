@@ -1,4 +1,6 @@
 #include <iostream>
+#include <string>
+#include <vector>
 /*
  * Make sure to do
  * splain() {
@@ -6,8 +8,8 @@
  * }
  * in the bash during installation
  */
-char** tokenisation(std::string arg) {
-    std::vector<std::string> tokenList;
+std::vector<std::string> /* char** */ tokenisation(std::string arg) {
+    std::vector<std::string> tokenList = {""};
     bool inQuotes = false;
     unsigned char activeToken = 0;
     for (int i = 0; i < arg.length(); i++) {
@@ -28,12 +30,17 @@ char** tokenisation(std::string arg) {
             tokenList[activeToken] += arg[i];
         }
     }
+    return tokenList;
 }
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: splain [OPTIONS] <INPUT>" << std::endl;
         return 1;
     }
-
+    std::vector<std::string> tokens = tokenisation(std::string(argv[1]));
+    //simple demo
+    for (int i = 0; i < tokens.size(); i++) {
+        std::cout << i + 1 << ". " << tokens[i] << "\n";
+    }
     return 0;
 }
