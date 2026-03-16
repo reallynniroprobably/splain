@@ -1,0 +1,125 @@
+# .github/workflows/release.yml
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # --- LINUX ---
+          - os: ubuntu-latest
+            arch: x86_64
+            target_name: creep-linux-x86_64
+
+          - os: ubuntu-latest
+            arch: arm64
+            target_name: creep-linux-arm64
+
+          # --- WINDOWS ---
+          - os: windows-latest
+            arch: x86_64
+            target_name: creep-windows-x86_64.exe
+
+          - os: windows-latest
+            arch: arm64
+            target_name: creep-windows-arm64.exe
+
+          # --- MACOS (Apple Silicon only) ---
+          - os: macos-latest
+            arch: arm64
+            target_name: creep-macos-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- LINUX ARM64 ---
+      # GitHub doesn't have native Linux ARM runners on free tier,
+      # so we cross-compile using a QEMU emulated environment
+      - name: Set up QEMU (Linux ARM64 only)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install ARM64 cross-compiler (Linux ARM64 only)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'arm64'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      # --- CONFIGURE ---
+      - name: Configure (Linux x86_64)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure (Linux ARM64 cross-compile)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'arm64'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+
+      - name: Configure (Windows x86_64)
+        if: matrix.os == 'windows-latest' && matrix.arch == 'x86_64'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -A x64
+
+      - name: Configure (Windows ARM64)
+        if: matrix.os == 'windows-latest' && matrix.arch == 'arm64'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -A ARM64
+
+      - name: Configure (macOS ARM64)
+        if: matrix.os == 'macos-latest'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+
+      # --- BUILD ---
+      - name: Build
+        run: cmake --build build --config Release
+
+      # --- RENAME & UPLOAD ---
+      - name: Rename binary (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: mv build/creep ${{ matrix.target_name }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: mv build/Release/creep.exe ${{ matrix.target_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target_name }}
+          path: ${{ matrix.target_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+```
+
+---
+
+## What you'll get on a release
+
+A GitHub Release with these five files attached:
+```
+creep-linux-x86_64
+creep-linux-arm64
+creep-windows-x86_64.exe
+creep-windows-arm64.exe
+creep-macos-arm64
