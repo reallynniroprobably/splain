@@ -1,3 +1,5 @@
+#include <filesystem>
+#include <ios>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -42,5 +44,21 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < tokens.size(); i++) {
         std::cout << i + 1 << ". " << tokens[i] << "\n";
     }
+
+    if (std::getenv("BASH_VERSION")) {
+            std::cout << "Running under bash\n";
+        } else if (std::getenv("ZSH_VERSION")) {
+            std::cout << "Running under zsh\n";
+        } else if (std::getenv("FISH_VERSION")) {
+            std::cout << "Running under fish\n";
+        } else {
+            const char* shell = std::getenv("SHELL");
+            if (shell) {
+                std::cout << "Default shell: " << shell << "\n";
+            } else {
+                std::cout << "Shell could not be detected\n";
+            }
+        }
+
     return 0;
 }
