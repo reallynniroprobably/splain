@@ -9,9 +9,9 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false  # Don't cancel other matrix jobs if one fails
       matrix:
         include:
-          # --- LINUX ---
           - os: ubuntu-latest
             arch: x86_64
             target_name: creep-linux-x86_64
@@ -20,7 +20,6 @@ jobs:
             arch: arm64
             target_name: creep-linux-arm64
 
-          # --- WINDOWS ---
           - os: windows-latest
             arch: x86_64
             target_name: creep-windows-x86_64.exe
@@ -29,76 +28,164 @@ jobs:
             arch: arm64
             target_name: creep-windows-arm64.exe
 
-          # --- MACOS (Apple Silicon only) ---
           - os: macos-latest
             arch: arm64
             target_name: creep-macos-arm64
 
     runs-on: ${{ matrix.os }}
 
+    # Makes matrix job labels readable in the Actions UI
+    # e.g. "build (ubuntu-latest, arm64)" instead of a hash
+    name: "Build · ${{ matrix.target_name }}"
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --- LINUX ARM64 ---
-      # GitHub doesn't have native Linux ARM runners on free tier,
-      # so we cross-compile using a QEMU emulated environment
-      - name: Set up QEMU (Linux ARM64 only)
-        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v3
+      # Print exactly what we're building so logs are self-contained
+      - name: Log build target info
+        shell: bash
+        run: |
+          echo "================================================"
+          echo "  Target : ${{ matrix.target_name }}"
+          echo "  OS     : ${{ matrix.os }}"
+          echo "  Arch   : ${{ matrix.arch }}"
+          echo "  Ref    : ${{ github.ref }}"
+          echo "  Commit : ${{ github.sha }}"
+          echo "================================================"
 
+      # -------------------------------------------------------
+      # LINUX ARM64 — cross-compile setup
+      # -------------------------------------------------------
       - name: Install ARM64 cross-compiler (Linux ARM64 only)
         if: matrix.os == 'ubuntu-latest' && matrix.arch == 'arm64'
-        run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+        run: |
+          echo "→ Installing aarch64 cross-compiler..."
+          sudo apt-get update 2>&1 | tail -5
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "✓ Cross-compiler installed"
+          aarch64-linux-gnu-g++ --version
 
-      # --- CONFIGURE ---
+      # -------------------------------------------------------
+      # CMAKE CONFIGURE
+      # -------------------------------------------------------
       - name: Configure (Linux x86_64)
         if: matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: |
+          echo "→ Configuring for Linux x86_64..."
+          cmake -B build -DCMAKE_BUILD_TYPE=Release --log-level=WARNING
+          echo "✓ Configure complete"
 
-      - name: Configure (Linux ARM64 cross-compile)
+      - name: Configure (Linux ARM64)
         if: matrix.os == 'ubuntu-latest' && matrix.arch == 'arm64'
         run: |
+          echo "→ Configuring for Linux ARM64 (cross-compile)..."
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
             -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            --log-level=WARNING
+          echo "✓ Configure complete"
 
       - name: Configure (Windows x86_64)
         if: matrix.os == 'windows-latest' && matrix.arch == 'x86_64'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -A x64
+        run: |
+          echo "→ Configuring for Windows x86_64..."
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -A x64 --log-level=WARNING
+          echo "✓ Configure complete"
 
       - name: Configure (Windows ARM64)
         if: matrix.os == 'windows-latest' && matrix.arch == 'arm64'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -A ARM64
+        run: |
+          echo "→ Configuring for Windows ARM64..."
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -A ARM64 --log-level=WARNING
+          echo "✓ Configure complete"
 
       - name: Configure (macOS ARM64)
         if: matrix.os == 'macos-latest'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+        run: |
+          echo "→ Configuring for macOS ARM64..."
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            --log-level=WARNING
+          echo "✓ Configure complete"
 
-      # --- BUILD ---
+      # -------------------------------------------------------
+      # BUILD
+      # Verbose flag makes the compiler command visible in logs
+      # so you can see exactly what flags were used on failure
+      # -------------------------------------------------------
       - name: Build
-        run: cmake --build build --config Release
+        run: |
+          echo "→ Building ${{ matrix.target_name }}..."
+          cmake --build build --config Release --verbose
+          echo "✓ Build complete"
 
-      # --- RENAME & UPLOAD ---
+      # -------------------------------------------------------
+      # SANITY CHECK
+      # Confirm the binary actually exists before we try to rename it
+      # Catches edge cases where CMake reports success but output is missing
+      # -------------------------------------------------------
+      - name: Verify binary exists (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          if [ ! -f "build/creep" ]; then
+            echo "✗ ERROR: Expected binary not found at build/creep"
+            echo "  Contents of build/:"
+            ls -la build/
+            exit 1
+          fi
+          echo "✓ Binary found: $(ls -lh build/creep)"
+
+      - name: Verify binary exists (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path "build/Release/creep.exe")) {
+            Write-Error "✗ ERROR: Expected binary not found at build/Release/creep.exe"
+            Write-Host "Contents of build/Release/:"
+            Get-ChildItem build/Release/ -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Write-Host "✓ Binary found: $((Get-Item build/Release/creep.exe).Length) bytes"
+
+      # -------------------------------------------------------
+      # RENAME & UPLOAD
+      # -------------------------------------------------------
       - name: Rename binary (Linux / macOS)
         if: runner.os != 'Windows'
-        run: mv build/creep ${{ matrix.target_name }}
+        run: |
+          mv build/creep ${{ matrix.target_name }}
+          echo "✓ Renamed to ${{ matrix.target_name }}"
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
-        run: mv build/Release/creep.exe ${{ matrix.target_name }}
+        run: |
+          mv build/Release/creep.exe ${{ matrix.target_name }}
+          echo "✓ Renamed to ${{ matrix.target_name }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target_name }}
           path: ${{ matrix.target_name }}
+          if-no-files-found: error  # Fail loudly if artifact is missing
 
+      - name: Log success
+        shell: bash
+        run: |
+          echo "================================================"
+          echo "  ✓ ${{ matrix.target_name }} uploaded successfully"
+          echo "================================================"
+
+  # -------------------------------------------------------
+  # RELEASE JOB
+  # -------------------------------------------------------
   release:
     needs: build
     runs-on: ubuntu-latest
+    name: "Create Release"
 
     steps:
       - name: Download all artifacts
@@ -106,20 +193,37 @@ jobs:
         with:
           path: artifacts/
 
+      # Confirm all 5 expected files are present before creating the release
+      - name: Verify all artifacts downloaded
+        run: |
+          echo "→ Checking artifacts..."
+          EXPECTED=(
+            "creep-linux-x86_64/creep-linux-x86_64"
+            "creep-linux-arm64/creep-linux-arm64"
+            "creep-windows-x86_64.exe/creep-windows-x86_64.exe"
+            "creep-windows-arm64.exe/creep-windows-arm64.exe"
+            "creep-macos-arm64/creep-macos-arm64"
+          )
+          MISSING=0
+          for f in "${EXPECTED[@]}"; do
+            if [ ! -f "artifacts/$f" ]; then
+              echo "✗ Missing: $f"
+              MISSING=$((MISSING + 1))
+            else
+              echo "✓ Found: $f"
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo ""
+            echo "✗ $MISSING artifact(s) missing — aborting release"
+            exit 1
+          fi
+          echo ""
+          echo "✓ All artifacts present"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-```
-
----
-
-## What you'll get on a release
-
-A GitHub Release with these five files attached:
-```
-creep-linux-x86_64
-creep-linux-arm64
-creep-windows-x86_64.exe
-creep-windows-arm64.exe
-creep-macos-arm64
+          fail_on_unmatched_files: true  # Error if glob finds nothing
+          generate_release_notes: true   # Auto-generates changelog from commits
