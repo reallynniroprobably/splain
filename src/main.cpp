@@ -56,7 +56,5 @@ int main(int argc, char *argv[]) {
             } else {
                 std::cout << "Shell could not be detected\n";
             }
-        }
-// test
     return 0;
 }
