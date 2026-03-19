@@ -1,0 +1,39 @@
+# .github/workflows/mirror.yml
+name: Mirror to chookspace
+
+on:
+  push:
+    branches: ['**']
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed so we have the full commit graph, not a shallow clone
+
+      - name: Remove .github directory from working tree and index
+        run: |
+          git config user.email "mirror-bot@celnix.dev"
+          git config user.name "Mirror Bot"
+
+          # Stage the deletion of .github without touching the actual remote HEAD
+          # We do this on a detached scratch branch so we don't dirty main/master
+          git checkout --detach HEAD
+          git rm -r --cached .github
+          git commit --allow-empty -m "chore: strip .github for mirror push"
+
+      - name: Push to chookspace
+        env:
+          MIRROR_TOKEN: ${{ secrets.CHOOKSPACE_TOKEN }}
+          MIRROR_USER: ${{ secrets.CHOOKSPACE_USER }}
+        run: |
+          # Inject credentials into the remote URL — never hardcode these
+          git remote add chookspace "https://${MIRROR_USER}:${MIRROR_TOKEN}@chookspace.com/cairo/splain.git"
+
+          # Push the current detached HEAD to the matching branch on the mirror
+          # GITHUB_REF_NAME is the branch name that triggered the push (e.g. "main")
+          git push chookspace "HEAD:refs/heads/${GITHUB_REF_NAME}" --force
