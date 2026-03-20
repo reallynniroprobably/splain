@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 4.2)
 # Project configuration
 # ============================
 project(
-    splain
+    splainn
     VERSION 1.0
     LANGUAGES CXX
 )
